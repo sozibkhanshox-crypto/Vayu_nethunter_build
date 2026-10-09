@@ -1,0 +1,78 @@
+
+
+name: Build Anymore Vayu NetHunter Kernel
+
+on:
+workflow_dispatch:
+
+permissions:
+contents: read
+
+jobs:
+build:
+runs-on: ubuntu-22.04
+steps:
+- name: Checkout kernel source
+uses: actions/checkout@v4
+with:
+repository: AnymoreProject/android_kernel_vayu
+ref: 0f8b1c04302094439718fa5d8d9122d9f89a730b
+path: kernel
+
+  - name: Set up build dependencies
+    run: |
+      sudo apt-get update
+      sudo apt-get install -y \
+        build-essential bc bison flex \
+        libssl-dev libelf-dev device-tree-compiler \
+        python3 ccache clang-15 lld-15 llvm-15 \
+        gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+
+  - name: Restore saved kernel configuration
+    run: |
+      test -s vayu.config
+      mkdir -p kernel/out
+      cp vayu.config kernel/out/.config
+      cd kernel
+      scripts/config --enable CONFIG_CFG80211
+      scripts/config --enable CONFIG_MAC80211
+      scripts/config --enable CONFIG_USB
+      scripts/config --enable CONFIG_USB_HID
+      scripts/config --enable CONFIG_USB_F_HID
+      scripts/config --enable CONFIG_USB_CONFIGFS_F_HID
+      scripts/config --enable CONFIG_ATH9K_HTC
+      scripts/config --enable CONFIG_RTL8187
+      scripts/config --enable CONFIG_RT2X00
+      scripts/config --enable CONFIG_RT2800USB
+      make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 \
+        CC=clang-15 LD=ld.lld-15 \
+        CROSS_COMPILE=aarch64-linux-gnu- \
+        CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+        olddefconfig
+
+  - name: Compile kernel and device tree
+    run: |
+      cd kernel
+      make -j2 O=out ARCH=arm64 \
+        LLVM=1 LLVM_IAS=1 \
+        CC=clang-15 LD=ld.lld-15 \
+        AR=llvm-ar-15 NM=llvm-nm-15 \
+        STRIP=llvm-strip-15 \
+        OBJCOPY=llvm-objcopy-15 \
+        OBJDUMP=llvm-objdump-15 \
+        READELF=llvm-readelf-15 \
+        CLANG_TRIPLE=aarch64-linux-gnu- \
+        CROSS_COMPILE=aarch64-linux-gnu- \
+        CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+        Image dtbo.img
+
+  - name: Upload build outputs
+    if: success()
+    uses: actions/upload-artifact@v4
+    with:
+      name: vayu-kernel-build
+      path: |
+        kernel/out/arch/arm64/boot/Image
+        kernel/out/arch/arm64/boot/dtbo.img
+      if-no-files-found: error
+      retention-days: 7
